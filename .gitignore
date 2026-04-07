@@ -38,3 +38,4 @@ next-env.d.ts
 android/keystore.properties
 android/keystore/
 *.jks
+.vs/
