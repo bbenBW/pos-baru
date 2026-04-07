@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { supabase, supabaseConfigured } from "@/lib/supabase";
 
 export type UserRole = "owner" | "admin" | "kasir" | "gudang";
 
@@ -10,26 +10,29 @@ interface User {
     role: UserRole | null;
 }
 
+interface AuthState {
+    user: User | null;
+    loading: boolean;
+    hasHydrated: boolean;
+    initialized: boolean;
+    error: string | null;
+    initializeAuth: () => Promise<void>;
+    login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+    logout: () => Promise<void>;
+    refreshUserProfile: () => Promise<void>;
+    syncOwnerProfile: (ownerName?: string | null) => void;
+    setHasHydrated: (value: boolean) => void;
+}
+
+type AppUserRow = {
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    role: UserRole | null;
+    is_active: boolean | null;
+};
+
 const DEFAULT_OWNER_NAME = "Beni";
-
-const ROLE_USER_IDS: Record<UserRole, string> = {
-    owner: "00000000-0000-0000-0000-000000000001",
-    admin: "00000000-0000-0000-0000-000000000002",
-    kasir: "00000000-0000-0000-0000-000000000003",
-    gudang: "00000000-0000-0000-0000-000000000004",
-};
-
-const normalizeUser = (user: User | null): User | null => {
-    if (!user || !user.role) return user;
-    const roleId = ROLE_USER_IDS[user.role];
-    if (!roleId) return user;
-    return {
-        ...user,
-        id: roleId,
-        name: user.role === "owner" ? getOwnerDisplayName() : getRoleDisplayName(user.role),
-        email: user.email || `${user.role}@toko.com`,
-    };
-};
 
 const readStoredOwnerName = () => {
     if (typeof window === "undefined") return null;
@@ -45,7 +48,8 @@ const readStoredOwnerName = () => {
     }
 };
 
-export const getOwnerDisplayName = (ownerName?: string | null) => `${(ownerName && ownerName.trim()) || readStoredOwnerName() || DEFAULT_OWNER_NAME} (Owner)`;
+export const getOwnerDisplayName = (ownerName?: string | null) =>
+    `${(ownerName && ownerName.trim()) || readStoredOwnerName() || DEFAULT_OWNER_NAME} (Owner)`;
 
 export const getRoleDisplayName = (role: UserRole, ownerName?: string | null) => {
     const roleNames: Record<UserRole, string> = {
@@ -57,92 +61,159 @@ export const getRoleDisplayName = (role: UserRole, ownerName?: string | null) =>
     return roleNames[role];
 };
 
-const DEFAULT_PASSWORDS: Record<UserRole, string> = {
-    owner: "owner123",
-    admin: "admin123",
-    kasir: "kasir123",
-    gudang: "gudang123",
+const mapProfileToUser = (profile: AppUserRow, fallbackEmail?: string | null): User => {
+    const role = profile.role ?? "kasir";
+    return {
+        id: profile.id,
+        email: profile.email || fallbackEmail || "",
+        name: profile.full_name?.trim() || getRoleDisplayName(role),
+        role,
+    };
 };
 
-interface AuthState {
-    user: User | null;
-    rolePasswords: Record<UserRole, string>;
-    loading: boolean;
-    hasHydrated: boolean;
-    setUser: (user: User | null) => void;
-    setLoading: (loading: boolean) => void;
-    setHasHydrated: (value: boolean) => void;
-    logout: () => void;
-    verifyRolePassword: (role: UserRole, password: string) => boolean;
-    changeRolePassword: (role: UserRole, newPassword: string, ownerPassword: string) => boolean;
-    switchRole: (role: UserRole, password: string) => boolean;
-    syncOwnerProfile: (ownerName?: string | null) => void;
-}
+const loadProfileForCurrentSession = async (): Promise<{ user: User | null; error?: string }> => {
+    if (!supabaseConfigured) {
+        return { user: null, error: "Supabase belum dikonfigurasi di auth-lab." };
+    }
 
-export const useAuthStore = create<AuthState>()(
-    persist(
-        (set, get) => ({
-            user: { id: ROLE_USER_IDS.owner, email: "owner@toko.com", name: getOwnerDisplayName(), role: "owner" as UserRole },
-            rolePasswords: { ...DEFAULT_PASSWORDS },
-            loading: false,
-            hasHydrated: false,
+    const {
+        data: { session },
+        error: sessionError,
+    } = await supabase.auth.getSession();
 
-            setUser: (user) => set({ user }),
-            setLoading: (loading) => set({ loading }),
-            setHasHydrated: (value) => set({ hasHydrated: value }),
-            logout: () => set({ user: null }),
+    if (sessionError) {
+        return { user: null, error: sessionError.message };
+    }
 
-            verifyRolePassword: (role, password) => {
-                const { rolePasswords } = get();
-                return rolePasswords[role] === password;
-            },
+    if (!session?.user) {
+        return { user: null };
+    }
 
-            changeRolePassword: (role, newPassword, ownerPassword) => {
-                const { rolePasswords } = get();
-                if (rolePasswords["owner"] !== ownerPassword) {
-                    return false;
-                }
-                set({ rolePasswords: { ...rolePasswords, [role]: newPassword } });
-                return true;
-            },
+    const { data: profile, error: profileError } = await supabase
+        .from("app_users")
+        .select("id, email, full_name, role, is_active")
+        .eq("id", session.user.id)
+        .single();
 
-            switchRole: (role, password) => {
-                const { rolePasswords } = get();
-                if (rolePasswords[role] !== password) {
-                    return false;
-                }
+    if (profileError) {
+        return { user: null, error: `Profil user belum siap: ${profileError.message}` };
+    }
 
-                set({
-                    user: {
-                        id: ROLE_USER_IDS[role],
-                        email: `${role}@toko.com`,
-                        name: getRoleDisplayName(role),
-                        role,
-                    }
-                });
-                return true;
-            },
+    if (!profile?.is_active) {
+        return { user: null, error: "Akun ini belum aktif. Hubungi owner/admin." };
+    }
 
-            syncOwnerProfile: (ownerName) => {
-                const { user } = get();
-                if (!user || user.role !== "owner") return;
-                set({
-                    user: {
-                        ...user,
-                        name: getOwnerDisplayName(ownerName),
-                    }
-                });
-            },
-        }),
-        {
-            name: "auth-store",
-            partialize: (state: AuthState) => ({ user: state.user, rolePasswords: state.rolePasswords }),
-            onRehydrateStorage: () => (state) => {
-                if (state?.user) {
-                    state.setUser(normalizeUser(state.user));
-                }
-                state?.setHasHydrated(true);
-            },
+    return { user: mapProfileToUser(profile as AppUserRow, session.user.email) };
+};
+
+let authSubscriptionBound = false;
+
+export const useAuthStore = create<AuthState>()((set, get) => ({
+    user: null,
+    loading: false,
+    hasHydrated: false,
+    initialized: false,
+    error: null,
+
+    setHasHydrated: (value) => set({ hasHydrated: value }),
+
+    initializeAuth: async () => {
+        if (get().initialized) {
+            if (!get().hasHydrated) set({ hasHydrated: true });
+            return;
         }
-    )
-);
+
+        set({ loading: true, error: null });
+
+        const result = await loadProfileForCurrentSession();
+        set({
+            user: result.user,
+            error: result.error || null,
+            loading: false,
+            hasHydrated: true,
+            initialized: true,
+        });
+
+        if (!authSubscriptionBound && supabaseConfigured) {
+            authSubscriptionBound = true;
+            supabase.auth.onAuthStateChange(async (_event, session) => {
+                if (!session?.user) {
+                    set({ user: null, error: null, loading: false, hasHydrated: true, initialized: true });
+                    return;
+                }
+
+                const refreshed = await loadProfileForCurrentSession();
+                set({
+                    user: refreshed.user,
+                    error: refreshed.error || null,
+                    loading: false,
+                    hasHydrated: true,
+                    initialized: true,
+                });
+            });
+        }
+    },
+
+    login: async (email, password) => {
+        if (!supabaseConfigured) {
+            return { success: false, error: "Supabase auth-lab belum dikonfigurasi." };
+        }
+
+        set({ loading: true, error: null });
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+        });
+
+        if (error) {
+            set({ loading: false, error: error.message });
+            return { success: false, error: error.message };
+        }
+
+        const refreshed = await loadProfileForCurrentSession();
+        set({
+            user: refreshed.user,
+            error: refreshed.error || null,
+            loading: false,
+            hasHydrated: true,
+            initialized: true,
+        });
+
+        if (!refreshed.user) {
+            return { success: false, error: refreshed.error || "Profil user tidak ditemukan." };
+        }
+
+        return { success: true };
+    },
+
+    logout: async () => {
+        if (supabaseConfigured) {
+            await supabase.auth.signOut();
+        }
+        set({ user: null, error: null, loading: false });
+    },
+
+    refreshUserProfile: async () => {
+        set({ loading: true, error: null });
+        const refreshed = await loadProfileForCurrentSession();
+        set({
+            user: refreshed.user,
+            error: refreshed.error || null,
+            loading: false,
+            hasHydrated: true,
+            initialized: true,
+        });
+    },
+
+    syncOwnerProfile: (ownerName) => {
+        const { user } = get();
+        if (!user || user.role !== "owner") return;
+        set({
+            user: {
+                ...user,
+                name: getOwnerDisplayName(ownerName),
+            },
+        });
+    },
+}));

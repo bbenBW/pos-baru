@@ -1,11 +1,15 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { OfflineIndicator } from "@/components/shared/OfflineIndicator";
 import { SyncStatusToast } from "@/components/shared/SyncStatusToast";
 import { ClientShell } from "@/components/shared/ClientShell";
 
-const inter = Inter({ subsets: ["latin"] });
+const geistSans = localFont({
+  src: "./fonts/GeistVF.woff",
+  variable: "--font-geist-sans",
+  weight: "100 900",
+});
 
 export const metadata: Metadata = {
   title: "ERP & POS Bangunan",
@@ -28,7 +32,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id">
-      <body className={`${inter.className} bg-slate-50 text-slate-900`}>
+      <body className={`${geistSans.className} bg-slate-50 text-slate-900`}>
         <OfflineIndicator />
         <SyncStatusToast />
         <ClientShell>

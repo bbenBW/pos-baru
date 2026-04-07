@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { useSync } from '@/hooks/useSync';
 import { useRealtimeProducts } from '@/hooks/useRealtimeProducts';
@@ -9,10 +9,17 @@ import { useEffect } from 'react';
 
 export function ClientShell({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
+    const router = useRouter();
     const isAuthPage = pathname?.startsWith('/login');
     const { syncOfflineData } = useSync();
     const hasHydrated = useAuthStore(state => state.hasHydrated);
+    const user = useAuthStore(state => state.user);
+    const initializeAuth = useAuthStore(state => state.initializeAuth);
     useRealtimeProducts();
+
+    useEffect(() => {
+        void initializeAuth();
+    }, [initializeAuth]);
 
     // Apply persisted font scale on mount
     useEffect(() => {
@@ -22,9 +29,22 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    useEffect(() => {
+        if (!hasHydrated) return;
+
+        if (!user && !isAuthPage) {
+            router.replace('/login');
+            return;
+        }
+
+        if (user && isAuthPage) {
+            router.replace('/');
+        }
+    }, [hasHydrated, user, isAuthPage, router]);
+
     // Jalankan auto-sync di latar belakang (syncOfflineData stabil, tidak akan retrigger saat navigasi)
     useEffect(() => {
-        if (!isAuthPage) {
+        if (!isAuthPage && user) {
             syncOfflineData();
             const interval = setInterval(() => {
                 syncOfflineData();
@@ -59,13 +79,17 @@ export function ClientShell({ children }: { children: React.ReactNode }) {
                 document.removeEventListener('visibilitychange', handleVisibilitySync);
             };
         }
-    }, [isAuthPage, syncOfflineData]);
+    }, [isAuthPage, syncOfflineData, user]);
+
+    if (!hasHydrated) {
+        return <main className="flex-1 w-full h-full bg-slate-50" />;
+    }
 
     if (isAuthPage) {
         return <main className="flex-1 w-full">{children}</main>;
     }
 
-    if (!hasHydrated) {
+    if (!user) {
         return <main className="flex-1 w-full h-full bg-slate-50" />;
     }
 

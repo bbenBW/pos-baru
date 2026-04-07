@@ -158,13 +158,13 @@ export function Sidebar() {
 
                 <button
                     onClick={() => setShowRoleModal(true)}
-                    title={compact ? 'Ganti Role' : undefined}
+                    title={compact ? 'Akun & Logout' : undefined}
                     className={`flex items-center justify-center gap-2 border border-slate-300 hover:border-primary hover:bg-primary hover:text-white py-2 rounded-lg text-sm text-gray-600 font-medium transition-colors
                         ${compact ? 'w-10 h-10 px-0' : 'w-full px-3'}
                     `}
                 >
                     <LogIn className="w-4 h-4 flex-shrink-0" />
-                    {!compact && 'Ganti Role'}
+                    {!compact && 'Akun & Logout'}
                 </button>
 
                 {!compact && (

@@ -1,48 +1,33 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
-import { Building2, KeyRound } from 'lucide-react';
+import { AlertCircle, Building2, KeyRound } from 'lucide-react';
 
 export default function LoginPage() {
     const router = useRouter();
-    const setUser = useAuthStore((state) => state.setUser);
+    const { login, user, loading, error, hasHydrated, initializeAuth } = useAuthStore();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        void initializeAuth();
+    }, [initializeAuth]);
+
+    useEffect(() => {
+        if (hasHydrated && user) {
+            router.replace('/');
+        }
+    }, [hasHydrated, user, router]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
 
-        try {
-            // DUMMY LOGIN FOR OFFLINE DEMO
-            // In production with Supabase: await supabase.auth.signInWithPassword(...)
-            // Since 'FULL AUTO READY' was requested, we'll bypass actual auth but set a real state
-            // So the user can immediately use it offline without needing database credentials first.
-
-            const mockUser = {
-                id: '123e4567-e89b-12d3-a456-426614174000',
-                email: email || 'owner@toko.com',
-                name: 'Admin / Owner',
-                role: 'owner' as const
-            };
-
-            // Save to Zustand
-            setUser(mockUser);
-            // Save offline for persistence
-            if (typeof window !== 'undefined') {
-                localStorage.setItem('pos_session', JSON.stringify(mockUser));
-            }
-
-            router.push('/');
-        } catch (error) {
-            console.error(error);
-            alert("Login gagal.");
-        } finally {
-            setLoading(false);
+        const result = await login(email, password);
+        if (result.success) {
+            router.replace('/');
         }
     };
 
@@ -58,6 +43,13 @@ export default function LoginPage() {
                 </div>
 
                 <form onSubmit={handleLogin} className="p-8 space-y-6">
+                    {error && (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                            <span>{error}</span>
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                         <input
@@ -94,6 +86,12 @@ export default function LoginPage() {
                             </>
                         )}
                     </button>
+
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600 space-y-1">
+                        <p className="font-semibold text-slate-700">Role aktif di auth-lab:</p>
+                        <p>`owner`, `admin`, `kasir`, `gudang` memakai akun Supabase Auth masing-masing.</p>
+                        <p>Kalau login gagal, biasanya akun auth sudah ada tetapi profil `app_users` belum dibuat.</p>
+                    </div>
                 </form>
             </div>
         </div>
