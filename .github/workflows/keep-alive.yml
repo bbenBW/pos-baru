@@ -1,0 +1,27 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    # Berjalan di setiap hari ke-1, 4, 7, dan seterusnya setiap bulan pukul 00:00 UTC
+    # (Setiap 3 hari sekali agar tidak di-pause otomatis)
+    - cron: '0 0 */3 * *'
+  workflow_dispatch: # Memungkinkan Anda menjalankan ini secara manual di GitHub Actions
+
+jobs:
+  keep_alive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Jalankan Ping Supabase
+        env:
+          # Variabel ini diambil dari GitHub Secrets di repository Anda
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: node scripts/ping-supabase.mjs
